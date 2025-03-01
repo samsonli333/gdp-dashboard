@@ -1,6 +1,8 @@
 import streamlit as st
+from langchain import HuggingFaceHub
+from langchain.chains import ConversationChain
+from langchain.memory import ConversationBufferMemory
 from PIL import Image
-from huggingface_hub import InferenceClient
 
 # Set up the app title
 st.title("Chat App with Photo Uploads 📷🤖")
@@ -12,19 +14,24 @@ if "messages" not in st.session_state:
 if "uploaded_files" not in st.session_state:
     st.session_state.uploaded_files = []
 
-# Initialize Hugging Face Inference API
-HF_TOKEN = st.secrets["HF_TOKEN"]  # Add your Hugging Face token in Streamlit secrets
-client = InferenceClient(token=HF_TOKEN)
+# Initialize LangChain with Hugging Face
+def initialize_llm():
+    """Initialize the Hugging Face LLM via LangChain."""
+    repo_id = "deepseek-ai/DeepSeek-V3"  # Replace with your desired Hugging Face model
+    llm = HuggingFaceHub(repo_id=repo_id, huggingfacehub_api_token=st.secrets["HF_TOKEN"])
+    memory = ConversationBufferMemory()
+    conversation = ConversationChain(llm=llm, memory=memory)
+    return conversation
 
-# Function to interact with Hugging Face LLM
-def chat_with_llm(prompt):
-    """Get a response from the Hugging Face LLM."""
-    response = client.chat_completion(
-        model="deepseek-ai/DeepSeek-V3",  # Replace with your desired Hugging Face model
-        messages=[{"role": "user", "content": prompt}],
-        stream=False
-    )
-    return response.choices[0].message.content
+# Initialize the chatbot
+if "conversation" not in st.session_state:
+    st.session_state.conversation = initialize_llm()
+
+# Function to interact with the chatbot
+def chat_with_bot(prompt):
+    """Get a response from the chatbot."""
+    response = st.session_state.conversation.predict(input=prompt)
+    return response
 
 # Sidebar for file uploads
 with st.sidebar:
@@ -62,7 +69,8 @@ for uploaded_file in st.session_state.uploaded_files:
         with st.chat_message("system"):
             st.markdown(f"📷 **Uploaded Photo: {uploaded_file.name}**")
             img = Image.open(uploaded_file)
-            st.image(img, caption=uploaded_file.name, use_column_width=True)
+            img.save(f'./photo/{uploaded_file.name}')
+            st.image(img, caption=uploaded_file.name, use_container_width=True)
 
 # Chat input for user messages
 if prompt := st.chat_input("Type your message..."):
@@ -75,7 +83,7 @@ if prompt := st.chat_input("Type your message..."):
     
     # Get bot response
     with st.spinner("Thinking..."):
-        bot_response = chat_with_llm(prompt)
+        bot_response = chat_with_bot(prompt)
     
     # Add bot response to chat history
     st.session_state.messages.append({"role": "assistant", "content": bot_response})
