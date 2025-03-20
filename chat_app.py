@@ -1,86 +1,119 @@
 import streamlit as st
-from langchain import HuggingFaceHub
-from langchain.chains import ConversationChain
-from langchain.memory import ConversationBufferMemory
+from langchain_community.llms import HuggingFaceHub
+from langchain_huggingface import ChatHuggingFace
 import tensorflow as tf
 from PIL import Image
 import numpy as np
 from pathlib import Path
-from search import load_pdf , split_text , create_vector_store,semantic_search
+from search import load_pdf, split_text , create_vector_store,semantic_search
 
 
+
+if "sidebar" not in st.session_state:
+    st.session_state.sidebar = 'auto'
 
 model = tf.keras.models.load_model('tdc.keras')
 
-
-
+st.set_page_config(initial_sidebar_state=st.session_state.sidebar)
 
 # Set up the app title
 st.title("Chat App with Photo Uploads 📷🤖")
+
 
 # Initialize session state for chat history and uploaded files
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if "uploaded_files" not in st.session_state:
-    st.session_state.uploaded_files = []
+if "vector_store" not in st.session_state:
+    st.session_state.vector_store = ''
+
+if "uploaded_file" not in st.session_state:
+    st.session_state.uploaded_files = dict()
+
+if "file_path" not in st.session_state:
+    st.session_state.file_path = ''
+
+if "pdf_message" not in st.session_state:
+    st.session_state.pdf_message = True
 
 
 # Initialize LangChain with Hugging Face
 def initialize_llm():
     """Initialize the Hugging Face LLM via LangChain."""
-    repo_id = "deepseek-ai/DeepSeek-v3"  # Replace with your desired Hugging Face model
+    repo_id = "deepseek-ai/DeepSeek-v3" 
     llm = HuggingFaceHub(repo_id=repo_id, huggingfacehub_api_token=st.secrets["HF_TOKEN"])
-    memory = ConversationBufferMemory()
-    conversation = ConversationChain(llm=llm, memory=memory)
-    return conversation
-   
-
-# Initialize the chatbot
-if "conversation" not in st.session_state:
-    st.session_state.conversation = initialize_llm()
-
-# Function to interact with the chatbot
-def chat_with_bot(prompt):
-    try:
-        """Get a response from the chatbot."""
-        response = st.session_state.conversation.predict(input=prompt)
-        return response
-    except Exception as e:
-        st.error(f"Error generating response: {e}")
-        return "Sorry, I encountered an error. Please try again."
+    return llm
 
 
+chat_model = ChatHuggingFace(llm=initialize_llm(),verbose=True)
 
-def recognize(pic):
-    new_img = Image.open(pic).resize((160,160)).convert('RGB')
+
+def recognize(file_path):
+    new_img = Image.open(file_path).resize((160,160)).convert('RGB')
     new_img = np.array([new_img])
     result = model.predict(new_img)
     return ['Image','Logo'][int(result[0][0])]
 
 
+def reply_pdf(question):    
+    result = semantic_search(question, st.session_state.vector_store)
+    return result
+
+
+
+# Initialize the chatbot
+if "conversation" not in st.session_state:
+    st.session_state.conversation = chat_model
 
 
 
 # Sidebar for file uploads
 with st.sidebar:
-    st.header("Upload Photos")
-    uploaded_files = st.file_uploader(
+    with st.form("my_form",clear_on_submit=True):
+        st.header("Upload Photos")
+        uploaded_files = st.file_uploader(
         "Upload photos",
         type=["png", "jpg", "jpeg","pdf"],
-        accept_multiple_files=True,
+        accept_multiple_files=False,
         help="Upload images (PNG, JPG,PDF)"
-    )
+        )
+        st.session_state.uploaded_files = uploaded_files
+        submitted = st.form_submit_button("Submit")
+        if submitted:
+            st.session_state.sidebar = "collapsed"
+            st.rerun()
+            
   
-    if uploaded_files:
-        for uploaded_file in uploaded_files:
-            uploaded_file.seek(0)
-            st.session_state.uploaded_files.append(uploaded_file)   
+if uploaded_files:
+    if uploaded_files.type.startswith('image/'):
+        img = Image.open(uploaded_files)
+        file_path = f'./photo/{uploaded_files.name}'
+        img.save(file_path)
+        st.session_state.file_path = file_path
+    elif uploaded_files.type.startswith('application/'):
+        save_folder = './data'
+        save_path = Path(save_folder, uploaded_files.name)
+        with open(save_path, mode='wb') as w:
+            w.write(uploaded_files.getvalue())
+
+                # Load the PDF
+            documents = load_pdf(save_path)
+
+                # Split the text into chunks
+            st.markdown("Splitting text into chunks...")
+            texts = split_text(documents)
+
+                # Create the vector store
+            st.markdown("Creating vector store...")
+            st.session_state.vector_store = create_vector_store(texts)
+            st.markdown("already Created Vector Store")
             st.session_state.messages.append({
                 "role": "system",
-                "content": f"Uploaded photo: {uploaded_file.name}"
-            })
-    
+                "content": f"Uploaded photo: {uploaded_files.name}"
+                })
+            uploaded_files = dict()
+
+
 
 # Display chat history
 for message in st.session_state.messages:
@@ -92,72 +125,37 @@ for message in st.session_state.messages:
             st.markdown(message["content"])
     elif message["role"] == "system":
         with st.chat_message("system"):
-            st.markdown(f"📷 **{message['content']}**")
+            st.markdown(f"Already Imported 📷 **{message['content']}**")
+st.session_state.messages = list()
 
 
-
-# Display uploaded photos
-for uploaded_file in st.session_state.uploaded_files:
-    if uploaded_file.type.startswith("image/"):
-        with st.chat_message("system"):
-            # st.markdown(f"📷 **Uploaded Photo: {uploaded_file.name}**")
-            img = Image.open(uploaded_file)
-            img.save(f'./photo/{uploaded_file.name}')
-            st.image(img, caption=uploaded_file.name, use_column_width=True)
-        with st.spinner("Thinking..."):
-            try:
-                result = recognize(f'./photo/{uploaded_file.name}')
-                with st.chat_message("assistant"):
-                    st.markdown(result)
-            except Exception as e:
-                st.error(f"Recognize Error: {e}")
-    elif uploaded_file.type.startswith("application/"):
-        with st.chat_message("system"):
-            save_folder = './data'
-            save_path = Path(save_folder, uploaded_file.name)
-            with open(save_path, mode='wb') as w:
-                w.write(uploaded_file.getvalue())
-                # Load the PDF
-            with st.spinner("Loading PDF..."):
-           
-                documents = load_pdf(f'{save_folder}/{uploaded_file.name}')
-
-                # Split the text into chunks
-                st.markdown("Splitting text into chunks...")
-                texts = split_text(documents)
-            
-         
-                # Create the vector store
-                st.markdown("Creating vector store...")
-                vector_store = create_vector_store(texts)
-
-           
-                # Perform a semantic search
-                query = "What is the main topic of the document?"
-                st.markdown(f"Performing semantic search for query: '{query}'")
-                result = semantic_search(query, vector_store)
-                if not result is  None:
-                    st.markdown("Search Result:") 
-                    st.markdown(result)
 
 
 
 # Chat input for user messages
-if prompt := st.chat_input("Type your message..."):
-    # Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    # Display user message
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    
-    # Get bot response
-    with st.spinner("Thinking..."):
-        bot_response = chat_with_bot(prompt)
-    
-    # Add bot response to chat history
-    st.session_state.messages.append({"role": "assistant", "content": bot_response})
-    
-    # Display bot response
-    with st.chat_message("assistant"):
-        st.markdown(bot_response)
+if st.session_state.uploaded_files and st.session_state.uploaded_files.type.startswith('application/'):
+    if st.session_state.pdf_message:
+        with st.chat_message("ai"):
+            st.write('please ask a question for the PDF you have just attached to')
+            st.session_state.pdf_message = False
+    if prompt := st.chat_input("Type your question..."):
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+            
+        # Display user message
+        with st.chat_message("user"):
+            st.markdown(prompt)
+            
+        # Get bot response
+        with st.spinner("Thinking..."):
+            bot_response = reply_pdf(prompt)
+            
+        # Add bot response to chat history
+            st.session_state.messages.append({"role": "assistant", "content": bot_response})
+            
+        # Display bot response
+        with st.chat_message("assistant"):
+            st.markdown(bot_response)
+elif st.session_state.uploaded_files and st.session_state.uploaded_files.type.startswith('image/'):
+    with st.chat_message("ai"):
+        st.markdown(f'This is {recognize(st.session_state.file_path)}')
