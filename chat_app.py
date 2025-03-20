@@ -9,7 +9,11 @@ from pathlib import Path
 from search import load_pdf , split_text , create_vector_store,semantic_search
 
 
+
 model = tf.keras.models.load_model('tdc.keras')
+
+
+
 
 # Set up the app title
 st.title("Chat App with Photo Uploads 📷🤖")
@@ -53,6 +57,9 @@ def recognize(pic):
     new_img = np.array([new_img])
     result = model.predict(new_img)
     return ['Image','Logo'][int(result[0][0])]
+
+
+
 
 
 # Sidebar for file uploads
