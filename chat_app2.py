@@ -1,14 +1,16 @@
 import streamlit as st
 from langchain_community.llms import HuggingFaceHub
-from langchain_huggingface import ChatHuggingFace
 import tensorflow as tf
 from PIL import Image
 import numpy as np
 from pathlib import Path
 from search import load_pdf, split_text , create_vector_store,semantic_search
+from langchain_core.prompts import ChatPromptTemplate
+from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain.chat_models import init_chat_model
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
 
-
-ee
 
 
 
@@ -29,18 +31,19 @@ if "uploaded_files" not in st.session_state:
 # Initialize LangChain with Hugging Face
 def initialize_llm():
     """Initialize the Hugging Face LLM via LangChain."""
-    repo_id = "deepseek-ai/DeepSeek-v3" 
-    llm = HuggingFaceHub(repo_id=repo_id, huggingfacehub_api_token=st.secrets["HF_TOKEN"])
+    # repo_id = "deepseek-ai/DeepSeek-v3" 
+    # llm = HuggingFaceHub(repo_id=repo_id, huggingfacehub_api_token=st.secrets["HF_TOKEN"],model_kwargs={
+    #                     "return_full_text":False,
+    #                     })
+    llm = init_chat_model("gpt-4o-mini", model_provider="openai",api_key=st.secrets["OPENAI_API_KEY"])
     return llm
 
-
-chat_model = ChatHuggingFace(llm=initialize_llm(),verbose=True)
-
+model = ChatOpenAI(model="gpt-4o",api_key=st.secrets["OPENAI_API_KEY"])
 
 
-
-
+@tool
 def recognize():
+    """use when you need to answer about wether a photo or image is a logo or not."""
     if len(st.session_state.uploaded_files) > 0:
         file_path = [uploaded_file['file_path'] for uploaded_file in st.session_state.uploaded_files if uploaded_file['type'].startswith('image/')][0]
         new_img = Image.open(file_path).resize((160,160)).convert('RGB')
@@ -48,8 +51,16 @@ def recognize():
         result = model.predict(new_img)
         return ['Image','Logo'][int(result[0][0])]
 
+@tool
+def reply_pdf(input:str):
+    """useful when you need to answer about pdf.
+        use the entire question as input.
+        for instance , if the question is 'what is the topic' , the input should be 'what is the topic'
+        
+        Args:
+        input: First string
+    """
 
-def reply_pdf(input = 'what is the topic of this pdf'):
     if len(st.session_state.uploaded_files) > 0:
         file_path = [uploaded_file['file_path'] for uploaded_file in st.session_state.uploaded_files if uploaded_file['type'].startswith('application/')][0]
      # Load the PDF
@@ -67,24 +78,33 @@ def reply_pdf(input = 'what is the topic of this pdf'):
 
 
 
+tools = [recognize,reply_pdf]
 
 
+prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", "You are a helpful assistant"),
+        ("human", "{input}"),
+        # Placeholders fill up a **list** of messages
+        ("placeholder", "{agent_scratchpad}"),
+    ]
+)
 
-
+agent = create_tool_calling_agent(model, tools, prompt)
+agent_executor = AgentExecutor(agent=agent, tools=tools)
 
 
 # Initialize the chatbot
 if "conversation" not in st.session_state:
-    st.session_state.conversation = chat_model
+    st.session_state.conversation = agent_executor
 
 
 # Function to interact with the chatbot
 def chat_with_bot(query):
     try:
         """Get a response from the chatbot."""
-        # response = st.session_state.conversation.invoke({"context":reply_pdf(),"question": query})
-        response = st.session_state.conversation.invoke(query)
-        return response
+        response = st.session_state.conversation.invoke({"input":query})
+        return response['output']
     except Exception as e:
         st.error(f"Error generating response: {e}")
         return "Sorry, I encountered an error. Please try again."
