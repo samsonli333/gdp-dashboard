@@ -1,5 +1,5 @@
 import streamlit as st
-from langchain_community.llms import HuggingFaceHub
+# from langchain_community.llms import HuggingFaceHub
 import tensorflow as tf
 from PIL import Image
 import numpy as np
