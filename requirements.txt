@@ -1,2 +1,13 @@
 streamlit
 pandas
+langchain 
+langchain-community
+langchain-core
+langchain-openai
+langchain-text-splitters
+openai
+pillow
+pypdf
+tensorflow 
+sentence-transformers
+pydantic    
