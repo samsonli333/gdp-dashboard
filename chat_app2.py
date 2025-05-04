@@ -1,5 +1,4 @@
 import streamlit as st
-# from langchain_community.llms import HuggingFaceHub
 import tensorflow as tf
 from PIL import Image
 import numpy as np
@@ -38,7 +37,7 @@ def initialize_llm():
     llm = init_chat_model("gpt-4o-mini", model_provider="openai",api_key=st.secrets["OPENAI_API_KEY"])
     return llm
 
-model = ChatOpenAI(model="gpt-4o",api_key=st.secrets["OPENAI_API_KEY"])
+model_chat = ChatOpenAI(model="gpt-4o",api_key=st.secrets["OPENAI_API_KEY"])
 
 
 @tool
@@ -90,7 +89,7 @@ prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-agent = create_tool_calling_agent(model, tools, prompt)
+agent = create_tool_calling_agent(model_chat, tools, prompt)
 agent_executor = AgentExecutor(agent=agent, tools=tools)
 
 
